@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SDR ⇄ TXT конвертер</title>
+<style>
+  :root{
+    --bg:#f4f6f8; --panel:#ffffff; --ink:#14181d; --muted:#5f6b7a; --line:#dde3ea;
+    --accent:#1f6feb; --accent-ink:#fff; --ok:#137a4b; --warn:#9a6400; --err:#b3261e;
+    --warn-bg:#fff7e6; --err-bg:#fdecea; --code-bg:#f7f9fb;
+    --radius:10px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161b; --panel:#191f26; --ink:#e6edf3; --muted:#94a3b3; --line:#2b333d;
+      --accent:#4c8dff; --accent-ink:#0b0f14; --ok:#4ad295; --warn:#e8b339; --err:#ff7b72;
+      --warn-bg:#2a2311; --err-bg:#2b1614; --code-bg:#10151a;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 16px 64px}
+  h1{font-size:22px;margin:0 0 4px}
+  h2{font-size:15px;margin:0 0 12px;letter-spacing:.02em;text-transform:uppercase;color:var(--muted)}
+  .sub{color:var(--muted);margin:0 0 20px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+         padding:16px;margin-bottom:16px}
+  /* ---- dropzone ---- */
+  #drop{border:2px dashed var(--line);border-radius:var(--radius);padding:28px 16px;text-align:center;
+        cursor:pointer;transition:border-color .15s,background .15s;background:var(--panel)}
+  #drop.over{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
+  #drop b{display:block;font-size:16px;margin-bottom:4px}
+  #drop span{color:var(--muted)}
+  /* ---- controls ---- */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px 16px}
+  label.f{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+  input[type=text],input[type=number],select,textarea{
+    width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:7px;
+    background:var(--code-bg);color:var(--ink);font:inherit}
+  textarea{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;resize:vertical}
+  .chk{display:flex;align-items:center;gap:8px;margin:6px 0}
+  .chk input{accent-color:var(--accent);width:16px;height:16px}
+  .chk label{cursor:pointer}
+  button{font:inherit;padding:8px 14px;border-radius:7px;border:1px solid var(--line);
+         background:var(--panel);color:var(--ink);cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+  button.primary:hover{filter:brightness(1.08)}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  details>summary{cursor:pointer;color:var(--muted);user-select:none;padding:2px 0}
+  details>summary:hover{color:var(--ink)}
+  fieldset{border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;margin:0 0 12px}
+  legend{padding:0 6px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+  /* ---- results ---- */
+  .card{border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;margin-bottom:10px;background:var(--panel)}
+  .card h3{margin:0;font-size:15px;word-break:break-all}
+  .meta{color:var(--muted);font-size:13px;margin:4px 0 10px}
+  .tag{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11px;font-weight:600;
+       border:1px solid var(--line);margin-right:6px;vertical-align:1px}
+  .tag.sdr{color:var(--accent);border-color:var(--accent)}
+  .tag.txt{color:var(--ok);border-color:var(--ok)}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:7px;padding:10px;
+      overflow:auto;font-size:12px;margin:8px 0 0;max-height:280px;
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre}
+  .msg{border-radius:7px;padding:8px 10px;margin:8px 0 0;font-size:13px}
+  .msg.warn{background:var(--warn-bg);color:var(--warn)}
+  .msg.err{background:var(--err-bg);color:var(--err)}
+  .msg ul{margin:4px 0 0 18px;padding:0}
+  canvas{width:100%;height:260px;border:1px solid var(--line);border-radius:7px;background:var(--code-bg);margin-top:8px}
+  table{border-collapse:collapse;width:100%;font-size:12px;margin-top:8px}
+  th,td{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left;white-space:nowrap}
+  th{color:var(--muted);font-weight:600}
+  td.n{text-align:right;font-family:ui-monospace,Menlo,Consolas,monospace}
+  .hint{color:var(--muted);font-size:12px;margin-top:6px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:720px){.cols{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>SDR ⇄ TXT конвертер</h1>
+  <p class="sub">Sokkia SDR33 (координатные записи <code>08</code>) ⇄ текстовый формат <code>имя,X,Y,Z,</code>.
+     Всё считается прямо в браузере — файлы никуда не отправляются.</p>
+
+  <div class="panel">
+    <div id="drop">
+      <b>Перетащите сюда файлы .sdr или .txt</b>
+      <span>или нажмите, чтобы выбрать · направление определяется автоматически</span>
+      <input type="file" id="file" multiple accept=".sdr,.SDR,.txt,.TXT,.csv,.CSV,.crd,.dat,text/plain" hidden>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="primary" id="dlAll" disabled>Скачать все результаты</button>
+      <button id="clear" disabled>Очистить</button>
+      <span class="hint" id="status"></span>
+    </div>
+  </div>
+
+  <details class="panel" id="optPanel">
+    <summary><b style="color:var(--ink)">Настройки конвертации</b></summary>
+    <div style="margin-top:14px">
+      <div class="cols">
+
+        <fieldset>
+          <legend>TXT → SDR</legend>
+          <div class="grid">
+            <div>
+              <label class="f" for="sdrDec">Знаков после запятой</label>
+              <input type="number" id="sdrDec" value="3" min="0" max="6">
+            </div>
+            <div>
+              <label class="f" for="sdrSplit">Точек в блоке (0 — без деления)</label>
+              <input type="number" id="sdrSplit" value="0" min="0" step="1">
+            </div>
+          </div>
+          <div class="chk"><input type="checkbox" id="sdrStrip" checked><label for="sdrStrip">Убирать хвостовые нули (38644.000 → 38644)</label></div>
+          <div class="chk"><input type="checkbox" id="sdrRenum"><label for="sdrRenum">Заменять имена на номера 1…N</label></div>
+          <div class="chk"><input type="checkbox" id="sdrCode"><label for="sdrCode">Писать код точки в поле кода (столбцы 69–84)</label></div>
+          <div style="margin-top:10px">
+            <label class="f" for="sdrHdr">Строка заголовка (запись 00)</label>
+            <input type="text" id="sdrHdr" value="00NMSDR33 V04-02.00                     213111" spellcheck="false">
+          </div>
+          <div style="margin-top:8px">
+            <label class="f" for="sdrJob">Строка проекта (запись 10)</label>
+            <input type="text" id="sdrJob" value="10NM                121111" spellcheck="false">
+          </div>
+          <p class="hint">Если загрузить .sdr, эти две строки автоматически подставятся из него.</p>
+        </fieldset>
+
+        <fieldset>
+          <legend>SDR → TXT</legend>
+          <div class="grid">
+            <div>
+              <label class="f" for="txtDec">Знаков после запятой</label>
+              <input type="number" id="txtDec" value="4" min="0" max="6">
+            </div>
+            <div>
+              <label class="f" for="txtSep">Разделитель</label>
+              <select id="txtSep">
+                <option value=",">запятая ( , )</option>
+                <option value=";">точка с запятой ( ; )</option>
+                <option value="\t">табуляция</option>
+                <option value=" ">пробел</option>
+              </select>
+            </div>
+          </div>
+          <div class="chk"><input type="checkbox" id="txtTail" checked><label for="txtTail">Разделитель в конце строки</label></div>
+          <div class="chk"><input type="checkbox" id="txtCode"><label for="txtCode">Добавлять код точки последним полем</label></div>
+          <div class="chk"><input type="checkbox" id="txtSkipZ"><label for="txtSkipZ">Пропускать точки с нулевой высотой</label></div>
+        </fieldset>
+      </div>
+
+      <fieldset>
+        <legend>Общие</legend>
+        <div class="grid">
+          <div>
+            <label class="f" for="order">Порядок координат в TXT</label>
+            <select id="order">
+              <option value="NEZ">имя, X(N), Y(E), Z — как в примере</option>
+              <option value="ENZ">имя, Y(E), X(N), Z — поменять местами</option>
+            </select>
+          </div>
+          <div>
+            <label class="f" for="eol">Конец строки</label>
+            <select id="eol">
+              <option value="crlf">CRLF (Windows) — как в примере</option>
+              <option value="lf">LF (Unix)</option>
+            </select>
+          </div>
+          <div>
+            <label class="f" for="enc">Кодировка результата</label>
+            <select id="enc">
+              <option value="auto">Авто (Windows-1251 при кириллице)</option>
+              <option value="1251">Windows-1251</option>
+              <option value="utf8">UTF-8</option>
+            </select>
+          </div>
+        </div>
+      </fieldset>
+    </div>
+  </details>
+
+  <div class="panel">
+    <h2>Ручной ввод</h2>
+    <div class="cols">
+      <div>
+        <label class="f" for="inText">Исходный текст</label>
+        <textarea id="inText" rows="9" spellcheck="false" placeholder="G4,38500.4060,-21981.2990,236.1090,&#10;или&#10;08CO               138600.959       -22005.533      0"></textarea>
+      </div>
+      <div>
+        <label class="f" for="outText">Результат</label>
+        <textarea id="outText" rows="9" spellcheck="false" readonly></textarea>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="convBtn">Конвертировать</button>
+      <button id="copyBtn">Копировать</button>
+      <button id="dlText">Скачать</button>
+      <span class="hint" id="manualInfo"></span>
+    </div>
+  </div>
+
+  <div id="results"></div>
+
+  <details class="panel">
+    <summary><b style="color:var(--ink)">Справка по формату</b></summary>
+    <p>Запись координат SDR33 — фиксированные колонки (всего 84 символа):</p>
+    <pre>08CO               138600.959       -22005.533      0
+││ ││              ││              ││              ││              │
+1-2│ └─ 5–20 имя ──┘└ 21–36 X (N) ─┘└ 37–52 Y (E) ─┘└ 53–68 H ─────┘└ 69–84 код ┘
+ └─ 3–4 подтип (CO — координаты)</pre>
+    <p>Имя выравнивается вправо, числа — влево, поля дополняются пробелами.
+       Строка <code>00NM…</code> — заголовок файла, <code>10NM…</code> — запись проекта;
+       они повторяются в начале каждого блока точек.</p>
+    <p>TXT: <code>имя,X,Y,Z,</code> — по одной точке в строке, разделитель запятая, 4 знака после запятой.</p>
+  </details>
+
+</div>
+
+<script>
+/* ==CORE-START== */
+/* ---------- Windows-1251 ---------- */
+var CP1251_HIGH =
+  "ЂЃ‚ѓ„…†‡€‰Љ‹ЊЌЋЏ" +
+  "ђ‘’“”•–—�™љ›њќћџ" +
+  " ЎўЈ¤Ґ¦§Ё©Є«¬­®Ї" +
+  "°±Ііґµ¶·ё№є»јЅѕї" +
+  "АБВГДЕЖЗИЙКЛМНОП" +
+  "РСТУФХЦЧШЩЪЫЬЭЮЯ" +
+  "абвгдежзийклмноп" +
+  "рстуфхцчшщъыьэюя";
+
+function cp1251Decode(bytes){
+  var out = "";
+  for (var i = 0; i < bytes.length; i++){
+    var b = bytes[i];
+    out += b < 0x80 ? String.fromCharCode(b) : CP1251_HIGH.charAt(b - 0x80);
+  }
+  return out;
+}
+function cp1251Encode(str){
+  var out = new Uint8Array(str.length);
+  for (var i = 0; i < str.length; i++){
+    var c = str.charCodeAt(i);
+    if (c < 0x80){ out[i] = c; continue; }
+    var idx = CP1251_HIGH.indexOf(str.charAt(i));
+    out[i] = idx >= 0 ? idx + 0x80 : 0x3F; /* '?' */
+  }
+  return out;
+}
+/** Декодирует байты файла: UTF-8, если он валиден, иначе Windows-1251. */
+function decodeBytes(buf){
+  var bytes = new Uint8Array(buf);
+  if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF)
+    bytes = bytes.subarray(3);
+  var ascii = true;
+  for (var i = 0; i < bytes.length; i++) if (bytes[i] > 0x7F){ ascii = false; break; }
+  if (ascii) return cp1251Decode(bytes);
+  try{
+    return new TextDecoder("utf-8", {fatal:true}).decode(bytes);
+  }catch(e){
+    return cp1251Decode(bytes);
+  }
+}
+function encodeText(str, mode){
+  if (mode === "utf8") return new TextEncoder().encode(str);
+  if (mode === "1251") return cp1251Encode(str);
+  /* auto: Windows-1251 — для ASCII результат тот же, приборы её понимают */
+  return cp1251Encode(str);
+}
+
+/* ---------- вспомогательные ---------- */
+function splitLines(text){ return text.replace(/\r\n?/g, "\n").split("\n"); }
+function eolOf(opts){ return opts.eol === "lf" ? "\n" : "\r\n"; }
+function padRight(s, n){ s = String(s); return s.length >= n ? s : s + new Array(n - s.length + 1).join(" "); }
+function padLeft(s, n){ s = String(s); return s.length >= n ? s : new Array(n - s.length + 1).join(" ") + s; }
+function field(line, start, len){ return line.substr(start, len).trim(); }
+
+/** Число → строка для колонки SDR: fixed-декималы, опционально без хвостовых нулей. */
+function formatNumber(v, decimals, strip){
+  var s = Number(v).toFixed(decimals);
+  if (strip && s.indexOf(".") !== -1) s = s.replace(/0+$/, "").replace(/\.$/, "");
+  if (s === "-0") s = "0";
+  return s;
+}
+function isNum(s){ return s !== "" && isFinite(Number(s)); }
+
+/* ---------- определение формата ---------- */
+function detectFormat(text, filename){
+  var lines = splitLines(text), sdrHits = 0, txtHits = 0, checked = 0;
+  for (var i = 0; i < lines.length && checked < 40; i++){
+    var l = lines[i];
+    if (!l.trim()) continue;
+    checked++;
+    if (/^\d{2}[A-Za-z0-9]{2}/.test(l)) sdrHits++;
+    else if (/^[^,;\t]*[,;\t][^,;\t]*[,;\t]/.test(l)) txtHits++;
+    else if (/^\S+(\s+[-+0-9.]+){3}/.test(l)) txtHits++;
+  }
+  if (sdrHits > txtHits) return "sdr";
+  if (txtHits > 0) return "txt";
+  var ext = String(filename || "").toLowerCase().split(".").pop();
+  return ext === "sdr" ? "sdr" : "txt";
+}
+
+/* ---------- SDR → точки ---------- */
+var COL = { NAME:[4,16], A:[20,16], B:[36,16], Z:[52,16], CODE:[68,16] };
+
+function parseSdr(text){
+  var lines = splitLines(text);
+  var points = [], warnings = [], header = null, job = null, blocks = 0, ignored = 0;
+  for (var i = 0; i < lines.length; i++){
+    var line = lines[i];
+    if (!line.trim()) continue;
+    var rec = line.substr(0, 2);
+    if (rec === "00"){ if (header === null) header = line.replace(/\s+$/, ""); blocks++; continue; }
+    if (rec === "10"){ if (job === null) job = line.replace(/\s+$/, ""); continue; }
+    if (rec !== "08"){ ignored++; continue; }
+    var name = field(line, COL.NAME[0], COL.NAME[1]);
+    var a = field(line, COL.A[0], COL.A[1]);
+    var b = field(line, COL.B[0], COL.B[1]);
+    var z = field(line, COL.Z[0], COL.Z[1]);
+    var code = field(line, COL.CODE[0], COL.CODE[1]);
+    if (!isNum(a) || !isNum(b)){
+      warnings.push("строка " + (i + 1) + ": не читаются координаты — пропущена");
+      continue;
+    }
+    points.push({
+      name: name || String(points.length + 1),
+      x: Number(a), y: Number(b), z: isNum(z) ? Number(z) : 0,
+      code: code, line: i + 1
+    });
+  }
+  if (ignored) warnings.push("пропущено служебных записей (не 08/00/10): " + ignored);
+  return { points: points, warnings: warnings, header: header, job: job, blocks: blocks };
+}
+
+/* ---------- точки → SDR ---------- */
+function buildSdr(points, opts){
+  var eol = eolOf(opts), dec = opts.sdrDecimals, strip = opts.sdrStrip;
+  var per = opts.sdrSplit > 0 ? opts.sdrSplit : points.length || 1;
+  var header = (opts.sdrHeader || "").replace(/[\r\n]/g, "");
+  var job = (opts.sdrJob || "").replace(/[\r\n]/g, "");
+  var out = [], warnings = [];
+  for (var start = 0; start < points.length; start += per){
+    if (header) out.push(header);
+    if (job) out.push(job);
+    var chunk = points.slice(start, start + per);
+    for (var i = 0; i < chunk.length; i++){
+      var p = chunk[i];
+      var name = opts.sdrRenumber ? String(i + 1) : String(p.name);
+      if (name.length > 16){
+        warnings.push("имя «" + name + "» длиннее 16 символов — обрезано");
+        name = name.substr(0, 16);
+      }
+      var a = opts.swap ? p.y : p.x, b = opts.swap ? p.x : p.y;
+      var cells = [
+        padLeft(name, 16),
+        padRight(formatNumber(a, dec, strip), 16),
+        padRight(formatNumber(b, dec, strip), 16),
+        padRight(formatNumber(p.z, dec, strip), 16),
+        padRight(opts.sdrWriteCode ? String(p.code || "").substr(0, 16) : "", 16)
+      ];
+      for (var c = 1; c <= 3; c++){
+        if (cells[c].length > 16)
+          warnings.push("точка «" + name + "»: значение " + cells[c].trim() + " не влезает в 16 символов");
+      }
+      out.push("08CO" + cells.join(""));
+    }
+  }
+  return { text: out.join(eol) + (out.length ? eol : ""), warnings: warnings };
+}
+
+/* ---------- TXT → точки ---------- */
+function parseTxt(text){
+  var lines = splitLines(text);
+  var points = [], warnings = [], skipped = 0;
+  for (var i = 0; i < lines.length; i++){
+    var raw = lines[i];
+    if (!raw.trim()) continue;
+    var parts = raw.split(/[,;\t]/);
+    if (parts.length < 2) parts = raw.trim().split(/\s+/);
+    parts = parts.map(function(s){ return s.trim(); });
+    while (parts.length && parts[parts.length - 1] === "") parts.pop();
+    var name, nums, code = "";
+    if (parts.length >= 4 && isNum(parts[1]) && isNum(parts[2]) && isNum(parts[3])){
+      name = parts[0]; nums = [parts[1], parts[2], parts[3]];
+      code = parts.length > 4 ? parts.slice(4).join(" ") : "";
+    } else if (parts.length === 3 && isNum(parts[0]) && isNum(parts[1]) && isNum(parts[2])){
+      name = String(points.length + 1); nums = parts;
+    } else if (parts.length >= 3 && isNum(parts[1]) && isNum(parts[2])){
+      name = parts[0]; nums = [parts[1], parts[2], "0"];
+    } else {
+      skipped++;
+      if (warnings.length < 12) warnings.push("строка " + (i + 1) + ": не распознана — «" + raw.substr(0, 60) + "»");
+      continue;
+    }
+    points.push({
+      name: name, x: Number(nums[0]), y: Number(nums[1]), z: Number(nums[2]),
+      code: code, line: i + 1
+    });
+  }
+  if (skipped > warnings.length) warnings.push("всего пропущено строк: " + skipped);
+  return { points: points, warnings: warnings, skipped: skipped };
+}
+
+/* ---------- точки → TXT ---------- */
+function buildTxt(points, opts){
+  var eol = eolOf(opts), dec = opts.txtDecimals, sep = opts.txtSep;
+  var out = [], skippedZ = 0;
+  for (var i = 0; i < points.length; i++){
+    var p = points[i];
+    if (opts.txtSkipZeroZ && Number(p.z) === 0){ skippedZ++; continue; }
+    var a = opts.swap ? p.y : p.x, b = opts.swap ? p.x : p.y;
+    var cells = [p.name, Number(a).toFixed(dec), Number(b).toFixed(dec), Number(p.z).toFixed(dec)];
+    if (opts.txtWriteCode) cells.push(p.code || "");
+    var line = cells.join(sep);
+    if (opts.txtTail) line += sep;
+    out.push(line);
+  }
+  var warnings = skippedZ ? ["пропущено точек с нулевой высотой: " + skippedZ] : [];
+  return { text: out.join(eol) + (out.length ? eol : ""), warnings: warnings };
+}
+
+/* ---------- единая точка входа ---------- */
+function convert(text, filename, opts){
+  var kind = opts.force || detectFormat(text, filename);
+  if (kind === "sdr"){
+    var parsed = parseSdr(text);
+    var built = buildTxt(parsed.points, opts);
+    return {
+      from:"sdr", to:"txt", source: text, points: parsed.points, text: built.text,
+      warnings: parsed.warnings.concat(built.warnings),
+      header: parsed.header, job: parsed.job, blocks: parsed.blocks
+    };
+  }
+  var p2 = parseTxt(text);
+  var b2 = buildSdr(p2.points, opts);
+  return {
+    from:"txt", to:"sdr", source: text, points: p2.points, text: b2.text,
+    warnings: p2.warnings.concat(b2.warnings)
+  };
+}
+/* ==CORE-END== */
+
+/* =======================  UI  ======================= */
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var results = [];
+
+  function opts(force){
+    return {
+      force: force || null,
+      eol: $("eol").value,
+      enc: $("enc").value,
+      swap: $("order").value === "ENZ",
+      sdrDecimals: Math.max(0, Math.min(6, parseInt($("sdrDec").value, 10) || 0)),
+      sdrStrip: $("sdrStrip").checked,
+      sdrRenumber: $("sdrRenum").checked,
+      sdrWriteCode: $("sdrCode").checked,
+      sdrSplit: Math.max(0, parseInt($("sdrSplit").value, 10) || 0),
+      sdrHeader: $("sdrHdr").value,
+      sdrJob: $("sdrJob").value,
+      txtDecimals: Math.max(0, Math.min(6, parseInt($("txtDec").value, 10) || 0)),
+      txtSep: $("txtSep").value === "\\t" ? "\t" : $("txtSep").value,
+      txtTail: $("txtTail").checked,
+      txtWriteCode: $("txtCode").checked,
+      txtSkipZeroZ: $("txtSkipZ").checked
+    };
+  }
+
+  function outName(name, to){
+    var base = name.replace(/\.[^.\\/]+$/, "");
+    return base + (to === "sdr" ? ".sdr" : ".txt");
+  }
+
+  function download(text, filename, enc){
+    var bytes = encodeText(text, enc);
+    var blob = new Blob([bytes], {type:"application/octet-stream"});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+  }
+
+  function esc(s){
+    return String(s).replace(/[&<>]/g, function(c){
+      return c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;";
+    });
+  }
+
+  function stats(points){
+    if (!points.length) return null;
+    var s = {xmin:Infinity,xmax:-Infinity,ymin:Infinity,ymax:-Infinity,zmin:Infinity,zmax:-Infinity};
+    points.forEach(function(p){
+      s.xmin = Math.min(s.xmin, p.x); s.xmax = Math.max(s.xmax, p.x);
+      s.ymin = Math.min(s.ymin, p.y); s.ymax = Math.max(s.ymax, p.y);
+      s.zmin = Math.min(s.zmin, p.z); s.zmax = Math.max(s.zmax, p.z);
+    });
+    return s;
+  }
+
+  function drawPlot(canvas, points){
+    var dpr = window.devicePixelRatio || 1;
+    var w = canvas.clientWidth, h = canvas.clientHeight;
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    var ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    var s = stats(points); if (!s) return;
+    var pad = 14;
+    /* по горизонтали — Y (восток), по вертикали — X (север, вверх) */
+    var dy = Math.max(s.ymax - s.ymin, 1e-6), dx = Math.max(s.xmax - s.xmin, 1e-6);
+    var k = Math.min((w - 2 * pad) / dy, (h - 2 * pad) / dx);
+    var ox = (w - dy * k) / 2, oy = (h - dx * k) / 2;
+    var css = getComputedStyle(document.body);
+    ctx.fillStyle = css.getPropertyValue("--accent") || "#1f6feb";
+    points.forEach(function(p){
+      var px = ox + (p.y - s.ymin) * k;
+      var py = h - oy - (p.x - s.xmin) * k;
+      ctx.beginPath(); ctx.arc(px, py, 1.8, 0, 6.2832); ctx.fill();
+    });
+  }
+
+  function render(){
+    var box = $("results");
+    box.innerHTML = "";
+    results.forEach(function(r, idx){
+      var card = document.createElement("div");
+      card.className = "card";
+      var s = stats(r.points);
+      var head =
+        '<div class="row" style="justify-content:space-between;align-items:flex-start">' +
+          '<div><h3>' + esc(r.name) + '</h3>' +
+          '<div class="meta"><span class="tag ' + r.from + '">' + r.from.toUpperCase() + '</span>→' +
+          '<span class="tag ' + r.to + '" style="margin-left:6px">' + r.to.toUpperCase() + '</span>' +
+          'точек: <b>' + r.points.length + '</b>' +
+          (r.blocks ? ' · блоков в исходнике: ' + r.blocks : '') +
+          (s ? ' · X ' + s.xmin.toFixed(2) + '…' + s.xmax.toFixed(2) +
+               ' · Y ' + s.ymin.toFixed(2) + '…' + s.ymax.toFixed(2) +
+               ' · Z ' + s.zmin.toFixed(2) + '…' + s.zmax.toFixed(2) : '') +
+          '</div></div>' +
+          '<button class="primary" data-dl="' + idx + '" title="' + esc(outName(r.name, r.to)) +
+            '" style="white-space:nowrap">Скачать .' + r.to + '</button>' +
+        '</div>';
+      var warn = r.warnings.length
+        ? '<div class="msg warn"><b>Предупреждения (' + r.warnings.length + '):</b><ul>' +
+          r.warnings.slice(0, 8).map(function(w){ return '<li>' + esc(w) + '</li>'; }).join('') +
+          (r.warnings.length > 8 ? '<li>…</li>' : '') + '</ul></div>'
+        : '';
+      var err = r.points.length ? '' :
+        '<div class="msg err">Не найдено ни одной точки — проверьте формат исходного файла.</div>';
+      var preview = r.text.split(/\r?\n/).slice(0, 15).join("\n");
+      var body =
+        '<details><summary>Первые строки результата</summary><pre>' + esc(preview) + '</pre></details>' +
+        '<details data-plot="' + idx + '"><summary>Схема точек</summary><canvas></canvas></details>';
+      card.innerHTML = head + err + warn + body;
+      box.appendChild(card);
+    });
+
+    box.querySelectorAll("[data-dl]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var r = results[+btn.getAttribute("data-dl")];
+        download(r.text, outName(r.name, r.to), r.enc);
+      });
+    });
+    box.querySelectorAll("[data-plot]").forEach(function(d){
+      d.addEventListener("toggle", function(){
+        if (d.open) drawPlot(d.querySelector("canvas"), results[+d.getAttribute("data-plot")].points);
+      });
+    });
+
+    $("dlAll").disabled = results.length === 0;
+    $("clear").disabled = results.length === 0;
+    var total = results.reduce(function(a, r){ return a + r.points.length; }, 0);
+    $("status").textContent = results.length
+      ? "Файлов: " + results.length + ", точек: " + total
+      : "";
+  }
+
+  function handleFiles(files){
+    var list = Array.prototype.slice.call(files);
+    if (!list.length) return;
+    /* .sdr обрабатываем первыми: из них берутся строки заголовка для обратной конвертации */
+    list.sort(function(a, b){
+      var as = /\.sdr$/i.test(a.name) ? 0 : 1, bs = /\.sdr$/i.test(b.name) ? 0 : 1;
+      return as - bs;
+    });
+    var pending = list.length;
+    list.forEach(function(f, i){
+      var reader = new FileReader();
+      reader.onload = function(){
+        var text = decodeBytes(reader.result);
+        var o = opts();
+        var r = convert(text, f.name, o);
+        r.name = f.name; r.enc = o.enc;
+        /* из первого загруженного SDR берём заголовки для обратной конвертации */
+        if (r.from === "sdr"){
+          if (r.header) $("sdrHdr").value = r.header;
+          if (r.job) $("sdrJob").value = r.job;
+        }
+        results.push(r);
+        if (--pending === 0) render();
+      };
+      reader.onerror = function(){ if (--pending === 0) render(); };
+      reader.readAsArrayBuffer(f);
+    });
+  }
+
+  /* --- drag & drop --- */
+  var drop = $("drop");
+  drop.addEventListener("click", function(){ $("file").click(); });
+  $("file").addEventListener("change", function(e){ handleFiles(e.target.files); e.target.value = ""; });
+  ["dragenter","dragover"].forEach(function(ev){
+    drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.add("over"); });
+  });
+  ["dragleave","drop"].forEach(function(ev){
+    drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.remove("over"); });
+  });
+  drop.addEventListener("drop", function(e){
+    if (e.dataTransfer && e.dataTransfer.files) handleFiles(e.dataTransfer.files);
+  });
+  window.addEventListener("dragover", function(e){ e.preventDefault(); });
+  window.addEventListener("drop", function(e){ e.preventDefault(); });
+
+  $("dlAll").addEventListener("click", function(){
+    results.forEach(function(r, i){
+      setTimeout(function(){ download(r.text, outName(r.name, r.to), r.enc); }, i * 250);
+    });
+  });
+  $("clear").addEventListener("click", function(){ results = []; render(); });
+
+  /* --- пересчёт при смене настроек --- */
+  document.querySelectorAll("input, select").forEach(function(el){
+    if (el.type === "file") return;
+    el.addEventListener("change", function(){
+      if (!results.length) return;
+      results = results.map(function(r){
+        var o = opts(r.from);
+        var nr = convert(r.source, r.name, o);
+        nr.name = r.name; nr.enc = o.enc;
+        return nr;
+      });
+      render();
+    });
+  });
+
+  /* --- ручной ввод --- */
+  function manual(){
+    var text = $("inText").value;
+    if (!text.trim()){ $("outText").value = ""; $("manualInfo").textContent = ""; return; }
+    var o = opts();
+    var r = convert(text, "manual.txt", o);
+    $("outText").value = r.text;
+    $("manualInfo").textContent = r.from.toUpperCase() + " → " + r.to.toUpperCase() +
+      ", точек: " + r.points.length +
+      (r.warnings.length ? ", предупреждений: " + r.warnings.length : "");
+    $("dlText").dataset.to = r.to;
+  }
+  $("convBtn").addEventListener("click", manual);
+  $("inText").addEventListener("input", manual);
+  $("copyBtn").addEventListener("click", function(){
+    $("outText").select();
+    try{ document.execCommand("copy"); }catch(e){}
+    if (navigator.clipboard) navigator.clipboard.writeText($("outText").value).catch(function(){});
+    $("manualInfo").textContent = "Скопировано";
+  });
+  $("dlText").addEventListener("click", function(){
+    var to = $("dlText").dataset.to || "sdr";
+    if (!$("outText").value) return;
+    download($("outText").value, "converted." + to, $("enc").value);
+  });
+})();
+</script>
+</body>
+</html>

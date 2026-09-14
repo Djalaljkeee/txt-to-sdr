@@ -132,6 +132,46 @@
   )
 )
 
+;; side lengths of the contour (closed)
+(defun r90r:sides (pts / n i lst p1 p2)
+  (setq n (length pts) i 0)
+  (while (< i n)
+    (setq p1 (nth i pts)
+          p2 (nth (rem (1+ i) n) pts)
+          lst (cons (distance (list (car p1) (cadr p1))
+                              (list (car p2) (cadr p2)))
+                    lst)
+          i (1+ i)
+    )
+  )
+  ;; drop zero-length closing segment (duplicated last vertex)
+  (vl-remove-if '(lambda (d) (< d 1e-8)) (reverse lst))
+)
+
+;; "SQUARE" / "RECTANGLE" / "OTHER"
+(defun r90r:shape (pts / sd mn mx)
+  (setq sd (r90r:sides pts))
+  (cond
+    ((/= 4 (length sd)) "OTHER")
+    (T
+     (setq mn (apply 'min sd) mx (apply 'max sd))
+     (if (< (- mx mn) (* 1e-6 mx)) "SQUARE" "RECTANGLE")
+    )
+  )
+)
+
+;; angle of the first side, degrees 0..360
+(defun r90r:edgeang (pts / a)
+  (setq a (angle (list (caar pts) (cadar pts))
+                 (list (car (cadr pts)) (cadr (cadr pts)))))
+  (/ (* 180.0 a) pi)
+)
+
+;; readable point
+(defun r90r:ptstr (p)
+  (strcat "(" (rtos (car p) 2 4) ", " (rtos (cadr p) 2 4) ")")
+)
+
 ;;; ------------------------------------------------------------------
 ;;;  low level modification (AutoLISP has no LET - plain defuns used)
 ;;; ------------------------------------------------------------------
@@ -288,7 +328,8 @@
 ;;; ==================================================================
 ;;;  DIAGNOSTICS
 ;;; ==================================================================
-(defun c:R90DIAG (/ ss i en ed typ knd pts key lst cell)
+(defun c:R90DIAG (/ ss i en ed typ knd pts key lst cell
+                    sq rc ot amin amax a first-pt)
 
   (princ "\nR90DIAG: select the objects you tried to rotate...")
   (setq ss (ssget))
@@ -296,7 +337,7 @@
   (if (null ss)
     (princ "\nR90DIAG: nothing selected.")
     (progn
-      (setq i 0)
+      (setq i 0 sq 0 rc 0 ot 0)
       (while (setq en (ssname ss i))
         (setq ed  (entget en)
               typ (cdr (assoc 0 ed))
@@ -319,6 +360,19 @@
                       )
               )
             )
+            (if (> (length pts) 2)
+              (progn
+                (if (null first-pt) (setq first-pt (car pts)))
+                (setq a (r90r:edgeang pts))
+                (if (or (null amin) (< a amin)) (setq amin a))
+                (if (or (null amax) (> a amax)) (setq amax a))
+                (cond
+                  ((= "SQUARE"    (r90r:shape pts)) (setq sq (1+ sq)))
+                  ((= "RECTANGLE" (r90r:shape pts)) (setq rc (1+ rc)))
+                  (T (setq ot (1+ ot)))
+                )
+              )
+            )
           )
           (if (member typ '("POLYLINE"))
             (setq key (strcat typ " / 3D or mesh -> skipped"))
@@ -338,8 +392,34 @@
       (foreach cell (reverse lst)
         (princ (strcat "\n   " (itoa (cdr cell)) " x  " (car cell)))
       )
-      (princ "\n   (INSERT = block reference: the polylines are inside a block,")
-      (princ "\n    explode it or edit the block, R90R cannot reach them.)")
+
+      (if (assoc "INSERT" lst)
+        (princ "\n   INSERT = block reference: the polylines are inside a block,\n          explode it or edit the block - R90R cannot reach them.")
+      )
+
+      (if (> (+ sq rc ot) 0)
+        (progn
+          (princ "\n   shape check:")
+          (if (> sq 0)
+            (princ (strcat "\n      SQUARES (all sides equal) : " (itoa sq)
+                           "   <- a 90 deg turn is INVISIBLE, the shape maps onto itself")))
+          (if (> rc 0)
+            (princ (strcat "\n      rectangles                : " (itoa rc)
+                           "   <- the turn must be clearly visible")))
+          (if (> ot 0)
+            (princ (strcat "\n      other contours            : " (itoa ot))))
+          (princ (strcat "\n      first side angle : from "
+                         (rtos amin 2 2) " to " (rtos amax 2 2) " deg"))
+        )
+      )
+      (if first-pt
+        (progn
+          (princ (strcat "\n   PROOF: 1st vertex of the 1st object = "
+                         (r90r:ptstr first-pt)))
+          (princ "\n          run R90R, then R90DIAG again on the same object:")
+          (princ "\n          this point MUST change -> the rotation really happened.")
+        )
+      )
     )
   )
   (princ)

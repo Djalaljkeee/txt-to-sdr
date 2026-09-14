@@ -1,7 +1,20 @@
 # R90R.lsp
 
-AutoLISP command for AutoCAD: rotates **each** selected closed `LWPOLYLINE`
-by exactly **+90°** around **its own geometric center**.
+AutoLISP commands for AutoCAD:
+
+* `R90R` — rotates **each** selected closed polyline by exactly **+90°**
+  around **its own geometric center**.
+* `R90DIAG` — diagnostics: reports what is really in the selection
+  (entity type, vertex count, closed/open, locked layer, block reference),
+  i.e. *why* an object was not rotated.
+
+Processed: closed `LWPOLYLINE` and closed 2D `POLYLINE` (heavy). A polyline
+whose last vertex coincides with the first is treated as closed as well, even
+when the `Closed` flag is not set. Skipped objects are counted and reported by
+reason: open, locked layer, 3D/mesh polyline, not modifiable.
+
+> A **square** rotated by 90° looks exactly the same on screen — that is
+> geometry, not a bug. `LIST` shows that the vertex order has changed.
 
 ## Load
 

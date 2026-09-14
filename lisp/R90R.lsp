@@ -3,7 +3,9 @@
 ;;;  ------------------------------------------------------------------
 ;;;  Commands :
 ;;;     R90R    - rotate EVERY selected closed polyline by exactly
-;;;               +90 degrees around ITS OWN geometric center.
+;;;               +45 degrees around ITS OWN geometric center.
+;;;               The angle is set by *R90R-DEG* below - change that
+;;;               single line to use 90, 30, -45 ... instead.
 ;;;     R90DIAG - diagnostics: tells what is actually in the selection
 ;;;               (entity types, closed / open, locked layers, blocks),
 ;;;               i.e. WHY something was not rotated.
@@ -26,6 +28,12 @@
 ;;; ==================================================================
 
 (vl-load-com)
+
+;;; ==================================================================
+;;;  ROTATION ANGLE, DEGREES, COUNTERCLOCKWISE.
+;;;  Change this one line to rotate by something else (90, 30, -45...)
+;;; ==================================================================
+(setq *R90R-DEG* 45.0)
 
 ;;; ------------------------------------------------------------------
 ;;;  helpers
@@ -97,14 +105,32 @@
   )
 )
 
-;; rotate one point by +/-90 deg around c
-;; cos(90)=0 and sin(90)=1 are used literally -> the center is kept exact
-(defun r90r:rot90 (p c s / dx dy)
+;; cosine/sine of an angle given in degrees.
+;; Multiples of 90 use exact 0 / +-1, so those turns stay free of
+;; floating point dust and the center is preserved bit-exactly.
+(defun r90r:cs (deg / m a)
+  (setq m (rem (+ (rem deg 360.0) 360.0) 360.0))
+  (cond
+    ((equal m 0.0   1e-9) '(1.0 . 0.0))
+    ((equal m 90.0  1e-9) '(0.0 . 1.0))
+    ((equal m 180.0 1e-9) '(-1.0 . 0.0))
+    ((equal m 270.0 1e-9) '(0.0 . -1.0))
+    (T (setq a (/ (* pi m) 180.0)) (cons (cos a) (sin a)))
+  )
+)
+
+;; angle actually used by the command (falls back to 45 deg)
+(defun r90r:deg ()
+  (if (and *R90R-DEG* (numberp *R90R-DEG*)) (float *R90R-DEG*) 45.0)
+)
+
+;; rotate one point around c by the angle given as cos/sin
+(defun r90r:rotpt (p c ca sa / dx dy)
   (setq dx (- (car p) (car c))
         dy (- (cadr p) (cadr c))
   )
-  (list (- (car c) (* s dy))
-        (+ (cadr c) (* s dx))
+  (list (+ (car c) (- (* dx ca) (* dy sa)))
+        (+ (cadr c) (+ (* dx sa) (* dy ca)))
   )
 )
 
@@ -177,10 +203,10 @@
 ;;; ------------------------------------------------------------------
 
 ;; LWPOLYLINE: rewrite every DXF 10 group of the entity list
-(defun r90r:mod-lw (en ed cen s / new)
+(defun r90r:mod-lw (en ed cen ca sa / new)
   (setq new (mapcar '(lambda (x)
                        (if (= 10 (car x))
-                         (cons 10 (r90r:rot90 (cdr x) cen s))
+                         (cons 10 (r90r:rotpt (cdr x) cen ca sa))
                          x
                        )
                      )
@@ -191,12 +217,12 @@
 )
 
 ;; heavy 2D POLYLINE: move every VERTEX sub-entity, keep its Z
-(defun r90r:mod-pl (en raw cen s / ok v vd np z)
+(defun r90r:mod-pl (en raw cen ca sa / ok v vd np z)
   (setq ok T)
   (foreach v raw
     (setq vd (entget (car v))
           z  (if (cadddr v) (cadddr v) 0.0)
-          np (r90r:rot90 (cdr v) cen s)
+          np (r90r:rotpt (cdr v) cen ca sa)
           np (list (car np) (cadr np) z)
     )
     (if (null (entmod (subst (cons 10 np) (assoc 10 vd) vd)))
@@ -211,7 +237,7 @@
 ;;;  process one entity
 ;;;  returns: 'OK 'GEOM 'OPEN 'LOCK 'TYPE 'ERR
 ;;; ------------------------------------------------------------------
-(defun r90r:do (en / ed knd pts raw cen nrm s res geom)
+(defun r90r:do (en / ed knd pts raw cen nrm s cs res geom)
   (setq ed  (entget en)
         knd (r90r:kind ed)
   )
@@ -234,13 +260,16 @@
         ;; Vertices are stored in the OCS of the object, so rotating
         ;; them inside the OCS is exactly an in-plane rotation. With an
         ;; inverted extrusion (Z = -1) the OCS is mirrored as seen from
-        ;; WCS +Z, so the sign is flipped to still give +90 on screen.
-        (setq s (if (and nrm (< (caddr nrm) 0.0)) -1.0 1.0))
+        ;; WCS +Z, so the sign is flipped to still turn counterclockwise
+        ;; on screen.
+        (setq s  (if (and nrm (< (caddr nrm) 0.0)) -1.0 1.0)
+              cs (r90r:cs (* s (r90r:deg)))
+        )
         (setq res (vl-catch-all-apply
                     (if (= knd "LW") 'r90r:mod-lw 'r90r:mod-pl)
                     (if (= knd "LW")
-                      (list en ed cen s)
-                      (list en raw cen s)
+                      (list en ed cen (car cs) (cdr cs))
+                      (list en raw cen (car cs) (cdr cs))
                     )
                   )
         )
@@ -259,7 +288,7 @@
 ;;; ==================================================================
 ;;;  MAIN COMMAND
 ;;; ==================================================================
-(defun c:R90R (/ *error* cme ss i en res ok geom opn lck typ bad undo)
+(defun c:R90R (/ *error* cme deg ss i en res ok geom opn lck typ bad undo)
 
   (setq cme (getvar "CMDECHO"))
 
@@ -277,8 +306,11 @@
   )
 
   (setvar "CMDECHO" 0)
+  (setq deg (r90r:deg))
 
-  (princ "\nSelect polylines to rotate (window / crossing / ALL)...")
+  (princ (strcat "\nSelect polylines to rotate by "
+                 (rtos deg 2 2)
+                 " deg about their own centers (window / crossing / ALL)..."))
   (setq ss (ssget '((0 . "LWPOLYLINE,POLYLINE"))))
 
   (if (null ss)
@@ -304,7 +336,8 @@
       (command "_.UNDO" "_End")
       (setq undo nil)
 
-      (princ (strcat "\nR90R: rotated by +90 deg : " (itoa (+ ok geom))))
+      (princ (strcat "\nR90R: rotated by " (rtos deg 2 2) " deg : "
+                     (itoa (+ ok geom))))
       (if (> geom 0)
         (princ (strcat "\n      (of them closed by geometry, flag not set : "
                        (itoa geom) ")")))
@@ -402,7 +435,9 @@
           (princ "\n   shape check:")
           (if (> sq 0)
             (princ (strcat "\n      SQUARES (all sides equal) : " (itoa sq)
-                           "   <- a 90 deg turn is INVISIBLE, the shape maps onto itself")))
+                           (if (equal 0.0 (rem (r90r:deg) 90.0) 1e-9)
+                             "   <- a 90 deg turn is INVISIBLE, the shape maps onto itself"
+                             "   <- visible with the current angle"))))
           (if (> rc 0)
             (princ (strcat "\n      rectangles                : " (itoa rc)
                            "   <- the turn must be clearly visible")))
@@ -425,6 +460,8 @@
   (princ)
 )
 
-(princ "\nR90R.lsp loaded.  R90R = rotate each closed polyline +90 deg about its own center.")
+(princ (strcat "\nR90R.lsp loaded.  R90R = rotate each closed polyline "
+               (rtos (r90r:deg) 2 2)
+               " deg about its own center."))
 (princ "\n                  R90DIAG = check why an object is not rotated.")
 (princ)

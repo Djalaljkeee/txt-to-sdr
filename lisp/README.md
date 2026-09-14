@@ -1,15 +1,15 @@
-# R90C.lsp
+# R90R.lsp
 
 AutoLISP command for AutoCAD: rotates **each** selected closed `LWPOLYLINE`
 by exactly **+90°** around **its own geometric center**.
 
 ## Load
 
-`APPLOAD` → select `R90C.lsp` → **Load** (optionally add it to *Startup Suite*).
+`APPLOAD` → select `R90R.lsp` → **Load** (optionally add it to *Startup Suite*).
 
 ## Run
 
-1. Type `R90C`.
+1. Type `R90R`.
 2. Select the polylines with a window / crossing / `ALL` — as many as you like.
 3. Press `Enter`. The command reports how many objects were rotated and how
    many were skipped.

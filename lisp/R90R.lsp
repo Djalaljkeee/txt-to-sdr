@@ -1,7 +1,7 @@
 ;;; ==================================================================
-;;;  R90C.lsp
+;;;  R90R.lsp
 ;;;  ------------------------------------------------------------------
-;;;  Command : R90C
+;;;  Command : R90R
 ;;;  Purpose : Rotate EVERY selected CLOSED LWPOLYLINE by exactly
 ;;;            +90 degrees around ITS OWN geometric center.
 ;;;
@@ -28,7 +28,7 @@
 ;;; ==================================================================
 
 ;;; --- all vertices (DXF 10) of an LWPOLYLINE, in order -------------
-(defun r90c:verts (ed / v lst)
+(defun r90r:verts (ed / v lst)
   (foreach v ed
     (if (= 10 (car v))
       (setq lst (cons (cdr v) lst))
@@ -38,7 +38,7 @@
 )
 
 ;;; --- average of the vertices (fallback for degenerate shapes) -----
-(defun r90c:avg (pts / sx sy n)
+(defun r90r:avg (pts / sx sy n)
   (setq sx 0.0
         sy 0.0
         n  (length pts)
@@ -61,7 +61,7 @@
 ;;; the result is correct for any rotation angle of the object.
 ;;; For a rectangle / square it is exactly the intersection point of
 ;;; the diagonals.
-(defun r90c:center (pts / n i p1 p2 cr a sx sy)
+(defun r90r:center (pts / n i p1 p2 cr a sx sy)
   (setq n  (length pts)
         i  0
         a  0.0
@@ -81,14 +81,14 @@
   (setq a (* 0.5 a))
   (if (> (abs a) 1e-10)
     (list (/ sx (* 6.0 a)) (/ sy (* 6.0 a)))
-    (r90c:avg pts)                              ; zero area -> average
+    (r90r:avg pts)                              ; zero area -> average
   )
 )
 
 ;;; --- rotate one point by +/-90 deg around c -----------------------
 ;;; cos(90) = 0 and sin(90) = 1 are used literally, so there is no
 ;;; floating point dust: the center is preserved bit-exactly.
-(defun r90c:rot90 (p c s / dx dy)
+(defun r90r:rot90 (p c s / dx dy)
   (setq dx (- (car p) (car c))
         dy (- (cadr p) (cadr c))
   )
@@ -99,14 +99,14 @@
 
 ;;; --- process one entity -------------------------------------------
 ;;; returns: T = rotated, "OPEN" / "DEGEN" / "ERR" = skipped
-(defun r90c:do (en / ed pts cen nrm s new)
+(defun r90r:do (en / ed pts cen nrm s new)
   (setq ed (entget en))
   (cond
     ((/= "LWPOLYLINE" (cdr (assoc 0 ed))) "ERR")
     ((/= 1 (logand 1 (cdr (assoc 70 ed)))) "OPEN")   ; not closed
-    ((< (length (setq pts (r90c:verts ed))) 3) "DEGEN")
+    ((< (length (setq pts (r90r:verts ed))) 3) "DEGEN")
     (T
-      (setq cen (r90c:center pts)
+      (setq cen (r90r:center pts)
             nrm (cdr (assoc 210 ed))
       )
       ;; Vertices of an LWPOLYLINE are stored in the OCS of the object.
@@ -118,7 +118,7 @@
       (setq s (if (and nrm (< (caddr nrm) 0.0)) -1.0 1.0))
       (setq new (mapcar '(lambda (x)
                            (if (= 10 (car x))
-                             (cons 10 (r90c:rot90 (cdr x) cen s))
+                             (cons 10 (r90r:rot90 (cdr x) cen s))
                              x
                            )
                          )
@@ -137,7 +137,7 @@
 ;;; ==================================================================
 ;;;  MAIN COMMAND
 ;;; ==================================================================
-(defun c:R90C (/ *error* cme ss i en res cnt opn bad undo)
+(defun c:R90R (/ *error* cme ss i en res cnt opn bad undo)
 
   (setq cme (getvar "CMDECHO"))
 
@@ -147,8 +147,8 @@
     (cond
       ((null msg) nil)
       ((wcmatch (strcase msg) "*BREAK*,*CANCEL*,*QUIT*")
-       (princ "\nR90C: cancelled by user."))
-      (T (princ (strcat "\nR90C: error - " msg)))
+       (princ "\nR90R: cancelled by user."))
+      (T (princ (strcat "\nR90R: error - " msg)))
     )
     (princ)
   )
@@ -159,7 +159,7 @@
   (setq ss (ssget '((0 . "LWPOLYLINE"))))       ; filter: LWPOLYLINE only
 
   (if (null ss)
-    (princ "\nR90C: nothing selected - command cancelled.")
+    (princ "\nR90R: nothing selected - command cancelled.")
     (progn
       (command "_.UNDO" "_Begin")
       (setq undo T)
@@ -170,7 +170,7 @@
             bad 0                                ; skipped: error / bad
       )
       (while (setq en (ssname ss i))
-        (setq res (r90c:do en))
+        (setq res (r90r:do en))
         (cond
           ((eq res T)      (setq cnt (1+ cnt)))
           ((= res "OPEN")  (setq opn (1+ opn)))
@@ -182,7 +182,7 @@
       (command "_.UNDO" "_End")
       (setq undo nil)
 
-      (princ (strcat "\nR90C: rotated by +90 deg : " (itoa cnt)))
+      (princ (strcat "\nR90R: rotated by +90 deg : " (itoa cnt)))
       (if (> opn 0)
         (princ (strcat "\n      skipped (not closed) : " (itoa opn)))
       )
@@ -196,5 +196,5 @@
   (princ)
 )
 
-(princ "\nR90C.lsp loaded.  Type R90C to rotate each closed LWPOLYLINE +90 deg about its own center.")
+(princ "\nR90R.lsp loaded.  Type R90R to rotate each closed LWPOLYLINE +90 deg about its own center.")
 (princ)
